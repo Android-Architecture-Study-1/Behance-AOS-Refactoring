@@ -1,52 +1,32 @@
 package com.sopt.behance_aos.ui.create
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.app.AlertDialog
-import android.content.ContentValues.TAG
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
-import android.provider.MediaStore
-import android.util.Log
 import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.databinding.DataBindingUtil
-import androidx.lifecycle.MutableLiveData
 import androidx.recyclerview.widget.GridLayoutManager
 import com.bumptech.glide.Glide
 import com.sopt.behance_aos.R
-import com.sopt.behance_aos.data.MediaStoreImage
-import com.sopt.behance_aos.data.RetrofitBuilder.createService
+import com.sopt.behance_aos.databinding.ActivityBehanceCreateBinding
 import com.sopt.behance_aos.ui.create.adpater.GalleryAdapter
-import com.sopt.behance_aos.data.response.ResponseFile
-import com.sopt.behance_aos.ui.create.title.BehanceTitleActivity
+import com.sopt.behance_aos.ui.create.viewmodel.CreateViewModel
 import com.sopt.behance_aos.util.GridItemSpaceDecoration
-import com.sopt.behance_aos.util.MultiPartResolver
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
-import java.text.SimpleDateFormat
-import java.util.*
 
 
 class BehanceCreateActivity : AppCompatActivity() {
 
 
-    private lateinit var binding: com.sopt.behance_aos.databinding.ActivityBehanceCreateBinding
-
-    private val images = MutableLiveData<List<MediaStoreImage>>()
-
-    private var fileUri: Uri? = null
+    private lateinit var binding: ActivityBehanceCreateBinding
+    private val createViewModel by viewModels<CreateViewModel>()
 
     private val requestPermissionLauncher =
         registerForActivityResult(
@@ -64,9 +44,12 @@ class BehanceCreateActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = DataBindingUtil.setContentView(this, R.layout.activity_behance_create)
-        backEvent()
+
+        // 권한 요청
         requestPermission()
 
+        // 버튼 클릭 이벤트
+        backEvent()
         nextBtn()
     }
 
@@ -116,11 +99,11 @@ class BehanceCreateActivity : AppCompatActivity() {
             it.adapter = galleryAdapter // 어댑터 연결
         }
 
-        images.observe(this) { images ->
-            galleryAdapter.submitList(images)
+        createViewModel.imageList.observe(this) {
+            galleryAdapter.submitList(it)
         }
 
-        showImages() // 이미지 데이터 연결
+        createViewModel.showImages(this) // 이미지 데이터 연결
 
         // 이미지 클릭 이벤트
         galleryAdapter.setOnItemClickListener(object : GalleryAdapter.OnItemClickListener {
@@ -128,72 +111,12 @@ class BehanceCreateActivity : AppCompatActivity() {
                 if (binding.ivCreateSquare.visibility != View.INVISIBLE) { // 안내 메세지 숨기기
                     hideContent()
                 }
+                createViewModel.setImgUri(uri)
                 Glide.with(this@BehanceCreateActivity).load(uri).into(binding.ivCreateSelectedPhoto)
-                fileUri = uri
             }
         })
     }
 
-    private fun showImages() {
-        GlobalScope.launch {
-            val imageList = queryImages()
-            images.postValue(imageList)
-        }
-    }
-
-    private suspend fun queryImages(): List<MediaStoreImage> {
-        val images = mutableListOf<MediaStoreImage>()
-
-        withContext(Dispatchers.IO) {
-            val projection = arrayOf(
-                MediaStore.Images.Media._ID,
-                MediaStore.Images.Media.DISPLAY_NAME,
-                MediaStore.Images.Media.DATE_TAKEN
-            )
-            val selection = "${MediaStore.Images.Media.DATE_TAKEN} >= ?"
-            val selectionArgs = arrayOf(
-                dateToTimestamp(day = 1, month = 1, year = 1970).toString()
-            )
-
-            val sortOrder = "${MediaStore.Images.Media.DATE_TAKEN} DESC"
-            contentResolver.query(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                projection,
-                null, // selection
-                null, // selectionArgs
-                sortOrder
-            )?.use { cursor ->
-                val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-                val dateTakenColumn =
-                    cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
-                val displayNameColumn =
-                    cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
-                while (cursor.moveToNext()) {
-                    val id = cursor.getLong(idColumn)
-                    val dateTaken = Date(cursor.getLong(dateTakenColumn))
-                    val displayName = cursor.getString(displayNameColumn)
-                    val contentUri = Uri.withAppendedPath(
-                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                        id.toString()
-                    )
-
-                    val image = MediaStoreImage(id, displayName, dateTaken, contentUri)
-                    images += image
-                    Log.d(TAG, image.toString())
-                }
-            }
-        }
-
-        Log.d(TAG, "Found ${images.size} images")
-        return images
-    }
-
-
-    @SuppressLint("SimpleDateFormat")
-    private fun dateToTimestamp(day: Int, month: Int, year: Int): Long =
-        SimpleDateFormat("dd.MM.yyyy").let { formatter ->
-            formatter.parse("$day.$month.$year")?.time ?: 0
-        }
 
     private fun backEvent() {
         binding.btnCreateBack.setOnClickListener {
@@ -216,40 +139,8 @@ class BehanceCreateActivity : AppCompatActivity() {
     // 파일 업로드
     private fun nextBtn() {
         binding.tvCreateNext.setOnClickListener {
-            // 파일 업로드 서버 통신
-            val file = MultiPartResolver(this).createImgMultiPart(fileUri!!)
-            val call = createService.postFile(file)
-
-            call.enqueue(object : Callback<ResponseFile> {
-                override fun onResponse(
-                    call: Call<ResponseFile>,
-                    response: Response<ResponseFile>
-                ) {
-
-                    if (response.isSuccessful) { // 파일 생성 성공
-
-                        val intent =
-                            Intent(this@BehanceCreateActivity, BehanceTitleActivity::class.java)
-                        intent.putExtra(
-                            "link",
-                            response.body()?.data?.link
-                        ) // 통신으로 받은 유저 link 값 넘겨주기
-
-                        startActivity(intent)
-
-                        finish()
-                    }
-
-                }
-
-                override fun onFailure(call: Call<ResponseFile>, t: Throwable) { // 서버 통신에러
-                    Log.e("NetworkTest", "error:$t")
-                }
-
-            })
-
+            createViewModel.postFile(this)
         }
     }
-
 
 }

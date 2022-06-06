@@ -76,4 +76,8 @@ dependencies {
 
     // image picker
     implementation "io.github.ParkSangGwon:tedimagepicker:1.2.8"
+
+    // ViewModel
+    implementation "androidx.lifecycle:lifecycle-viewmodel-ktx:2.5.0-rc01"
+    implementation 'androidx.fragment:fragment-ktx:1.4.1'
 }

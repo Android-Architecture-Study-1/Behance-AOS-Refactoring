@@ -1,5 +1,6 @@
 package com.sopt.behance_aos.util
 
+import android.net.Uri
 import android.widget.ImageView
 import androidx.databinding.BindingAdapter
 import com.bumptech.glide.Glide
@@ -37,5 +38,4 @@ object BindingAdapters {
                 .into(imageview)
         }
     }
-
 }
